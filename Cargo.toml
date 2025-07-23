@@ -3,6 +3,10 @@ name = "io_uring_echo"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "echo"
+path = "src/echo.rs"
+
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
 io-uring = "0.7"
