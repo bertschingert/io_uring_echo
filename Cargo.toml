@@ -13,5 +13,7 @@ path = "src/test_client.rs"
 
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
+env_logger = "0.11.8"
 io-uring = "0.7"
 libc = "0.2"
+log = "0.4.27"

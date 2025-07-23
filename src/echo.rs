@@ -3,6 +3,7 @@
 
 use clap::Parser;
 use io_uring::{IoUring, cqueue, opcode, types};
+use log::*;
 
 use std::fmt;
 use std::io;
@@ -28,6 +29,8 @@ struct Args {
 }
 
 fn main() -> io::Result<()> {
+    env_logger::init();
+
     let args = Args::parse();
 
     let mut ring = IoUring::new(args.entries_in_ring)?;
@@ -58,7 +61,7 @@ fn main() -> io::Result<()> {
                 std::ptr::with_exposed_provenance::<Operation>(cqe.user_data() as usize) as *mut _,
             )
         };
-        eprintln!("{op}: {cqe:?}");
+        debug!("{op}: {cqe:?}");
 
         match *op {
             Operation::Accept => {
@@ -75,7 +78,7 @@ fn main() -> io::Result<()> {
                 handle_receive(op, fd, cqe, &mut ring, &mut buffer_map)?;
             }
             Operation::Send(s) => {
-                s.handle(&mut buffer_map);
+                s.handle(cqe, &mut buffer_map);
             }
         }
 
@@ -143,8 +146,17 @@ impl Send {
         self.buf.as_ptr()
     }
 
-    fn handle(self, buffer_map: &mut BufferMap) {
-        // TODO: handle short send by resubmitting...
+    fn handle(self, cqe: cqueue::Entry, buffer_map: &mut BufferMap) {
+        match cqe.result() {
+            res if res < 0 => {
+                error!("Error in send: {res}");
+            }
+            res if (res as usize) < self.len => {
+                // TODO: handle short send by resubmitting...
+                warn!("Short send: only sent {} out of {} bytes", res, self.len);
+            }
+            _ => {}
+        }
 
         // SAFETY: the buf and group_id came from a completed Recv.
         unsafe {
@@ -178,6 +190,7 @@ fn resubmit_accept(
     ring: &mut IoUring,
     user_data: Box<Operation>,
 ) -> io::Result<()> {
+    warn!("Multishot accept did not set MORE flag; resubmitting");
     let accept_submission = opcode::AcceptMulti::new(listen_fd)
         .build()
         .user_data(operation_to_u64_noexpose(user_data));
@@ -203,10 +216,11 @@ fn handle_receive(
     match cqe.result() {
         // Error:
         res if res < 0 => {
-            eprintln!("error: {res}");
+            warn!("error: {res}");
         }
         // Connection is done:
         0 => {
+            trace!("Closing connection on fd {fd}");
             let _ = unsafe { libc::close(fd) };
             return Ok(());
         }
@@ -241,6 +255,7 @@ fn handle_receive(
 }
 
 fn resubmit_receive(fd: i32, ring: &mut IoUring, user_data: Box<Operation>) -> io::Result<()> {
+    warn!("Multishot receive did not set MORE flag; resubmitting");
     let submission = opcode::RecvMulti::new(types::Fd(fd), GROUP_ID)
         .build()
         .user_data(operation_to_u64_noexpose(user_data));
