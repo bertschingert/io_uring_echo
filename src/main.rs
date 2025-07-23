@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2025. Thomas Bertschinger
 
+use clap::Parser;
 use io_uring::{IoUring, cqueue, opcode, types};
 
 use std::io;
@@ -8,13 +9,26 @@ use std::net::TcpListener;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU16, Ordering};
 
-const BUF_SIZE: u32 = 128;
 const GROUP_ID: u16 = 17;
 
-fn main() -> io::Result<()> {
-    let mut ring = IoUring::new(8)?;
+#[derive(Parser)]
+struct Args {
+    #[arg(long, default_value_t = 8)]
+    num_bufs: u16,
 
-    let mut buffer_map = BufferMap::new(4, &mut ring);
+    #[arg(long, default_value_t = 1024)]
+    buf_size: u32,
+
+    #[arg(long, default_value_t = 8)]
+    entries_in_ring: u32,
+}
+
+fn main() -> io::Result<()> {
+    let args = Args::parse();
+
+    let mut ring = IoUring::new(args.entries_in_ring)?;
+
+    let mut buffer_map = BufferMap::new(&args, &mut ring);
 
     let listener = TcpListener::bind("127.0.0.1:0")?;
     println!("Listening on {}", listener.local_addr().unwrap());
@@ -230,6 +244,9 @@ struct BufferMap {
     /// The number of entries in the shared buffer ring.
     num_entries: u16,
 
+    /// The size of each buffer.
+    buf_size: u32,
+
     /// The tail of the ring, including unpublished buffers. This is the index of the next unused
     /// slot.
     private_tail: u16,
@@ -240,7 +257,8 @@ struct BufferMap {
 }
 
 impl BufferMap {
-    pub fn new(num_entries: u16, ring: &mut IoUring) -> Self {
+    pub fn new(args: &Args, ring: &mut IoUring) -> Self {
+        let num_entries = args.num_bufs;
         assert!(num_entries < u16::MAX);
         assert!(num_entries & (num_entries - 1) == 0); // must be a power of 2
 
@@ -262,6 +280,7 @@ impl BufferMap {
         let mut buffer_map = Self {
             addr,
             num_entries,
+            buf_size: args.buf_size,
             private_tail: 0,
             group_id: GROUP_ID,
             buffers: Vec::new(),
@@ -274,9 +293,9 @@ impl BufferMap {
         };
 
         for i in 0..num_entries {
-            buffer_map.buffers.push(vec![0; BUF_SIZE as usize]);
+            buffer_map.buffers.push(vec![0; args.buf_size as usize]);
             let addr: *mut u8 = buffer_map.buffers[i as usize].as_ptr() as *mut u8;
-            buffer_map.push_buf(addr, BUF_SIZE, i);
+            buffer_map.push_buf(addr, args.buf_size, i);
         }
 
         buffer_map.publish_bufs();
@@ -330,7 +349,7 @@ impl BufferMap {
     ///
     /// Has the same requirements as take_buf()
     pub unsafe fn resubmit_buf(&mut self, mut buf: Vec<u8>, id: u16) {
-        self.push_buf(buf.as_mut_ptr(), BUF_SIZE, id);
+        self.push_buf(buf.as_mut_ptr(), self.buf_size, id);
         self.buffers[id as usize] = buf;
         self.publish_bufs();
     }
