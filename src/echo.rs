@@ -21,6 +21,9 @@ struct Args {
 
     #[arg(long, default_value_t = 8)]
     entries_in_ring: u32,
+
+    #[arg(short, long, default_value_t = 0)]
+    port: u16,
 }
 
 fn main() -> io::Result<()> {
@@ -30,7 +33,7 @@ fn main() -> io::Result<()> {
 
     let mut buffer_map = BufferMap::new(&args, &mut ring);
 
-    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port))?;
     println!("Listening on {}", listener.local_addr().unwrap());
     let listen_fd = types::Fd(listener.as_raw_fd());
 
