@@ -4,6 +4,7 @@
 use clap::Parser;
 use io_uring::{IoUring, cqueue, opcode, types};
 
+use std::fmt;
 use std::io;
 use std::net::TcpListener;
 use std::os::fd::AsRawFd;
@@ -57,7 +58,7 @@ fn main() -> io::Result<()> {
                 std::ptr::with_exposed_provenance::<Operation>(cqe.user_data() as usize) as *mut _,
             )
         };
-        eprintln!("{cqe:?}");
+        eprintln!("{op}: {cqe:?}");
 
         match *op {
             Operation::Accept => {
@@ -87,6 +88,16 @@ enum Operation {
     Accept,
     Recv(Receive),
     Send(Send),
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Accept => write!(f, "Accept"),
+            Self::Recv(r) => write!(f, "Receive on FD {}", r.fd),
+            Self::Send(s) => write!(f, "Send: data was {} bytes", s.len),
+        }
+    }
 }
 
 /// Temporarily "leak" the Operation so that the kernel side can take ownership of it until the
@@ -120,11 +131,12 @@ impl Receive {
 struct Send {
     group_id: u16,
     buf: Vec<u8>,
+    len: usize,
 }
 
 impl Send {
-    fn new(group_id: u16, buf: Vec<u8>) -> Self {
-        Self { group_id, buf }
+    fn new(group_id: u16, buf: Vec<u8>, len: usize) -> Self {
+        Self { group_id, buf, len }
     }
 
     fn buf_ptr(&self) -> *const u8 {
@@ -132,6 +144,8 @@ impl Send {
     }
 
     fn handle(self, buffer_map: &mut BufferMap) {
+        // TODO: handle short send by resubmitting...
+
         // SAFETY: the buf and group_id came from a completed Recv.
         unsafe {
             buffer_map.resubmit_buf(self.buf, self.group_id);
@@ -204,7 +218,7 @@ fn handle_receive(
             // SAFETY: the group_id was just gotten from the completion
             let buf = unsafe { buffer_map.take_buf(group_id) };
 
-            let user_data = Send::new(group_id, buf);
+            let user_data = Send::new(group_id, buf, amount as usize);
             let send = opcode::Send::new(fd, user_data.buf_ptr(), amount as u32);
             let user_data = Box::new(Operation::Send(user_data));
             let send = send.build().user_data(operation_to_u64(user_data));
