@@ -7,6 +7,10 @@ edition = "2024"
 name = "echo"
 path = "src/echo.rs"
 
+[[bin]]
+name = "test_client"
+path = "src/test_client.rs"
+
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
 io-uring = "0.7"
