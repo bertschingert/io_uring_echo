@@ -133,12 +133,12 @@ impl Receive {
 #[derive(Debug)]
 struct Send {
     group_id: u16,
-    buf: Vec<u8>,
+    buf: Box<[u8]>,
     len: usize,
 }
 
 impl Send {
-    fn new(group_id: u16, buf: Vec<u8>, len: usize) -> Self {
+    fn new(group_id: u16, buf: Box<[u8]>, len: usize) -> Self {
         Self { group_id, buf, len }
     }
 
@@ -285,7 +285,7 @@ struct BufferMap {
 
     group_id: u16,
 
-    buffers: Vec<Vec<u8>>,
+    buffers: Vec<Box<[u8]>>,
 }
 
 impl BufferMap {
@@ -325,7 +325,9 @@ impl BufferMap {
         };
 
         for i in 0..num_entries {
-            buffer_map.buffers.push(vec![0; args.buf_size as usize]);
+            buffer_map
+                .buffers
+                .push(vec![0; args.buf_size as usize].into_boxed_slice());
             let addr: *mut u8 = buffer_map.buffers[i as usize].as_ptr() as *mut u8;
             buffer_map.push_buf(addr, args.buf_size, i);
         }
@@ -373,14 +375,14 @@ impl BufferMap {
     /// The caller must ensure that the buffer ID is one returned by the kernel in a completion
     /// event, and which has not been re-submitted to the kernel. Otherwise, reading the buffer can
     /// result in a data race with the kernel writing to that buffer.
-    pub unsafe fn take_buf(&mut self, id: u16) -> Vec<u8> {
+    pub unsafe fn take_buf(&mut self, id: u16) -> Box<[u8]> {
         std::mem::take(&mut self.buffers[id as usize])
     }
 
     /// SAFETY:
     ///
     /// Has the same requirements as take_buf()
-    pub unsafe fn resubmit_buf(&mut self, mut buf: Vec<u8>, id: u16) {
+    pub unsafe fn resubmit_buf(&mut self, mut buf: Box<[u8]>, id: u16) {
         self.push_buf(buf.as_mut_ptr(), self.buf_size, id);
         self.buffers[id as usize] = buf;
         self.publish_bufs();
