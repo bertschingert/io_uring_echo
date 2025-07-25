@@ -7,7 +7,7 @@ It uses `io_uring` with multishot accept and receive, and ring-mapped provided b
 ## Usage
 
 ```bash
-io_uring_echo $ cargo run
+io_uring_echo $ cargo run --bin echo
 # ...
 Listening on 127.0.0.1:35931
 
